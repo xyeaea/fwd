@@ -65,7 +65,7 @@ async def pub_(bot, message):
         try:
           MSG = []
           pling=0
-          await edit(m, 'Progressing', 1, sts)
+          await edit(m, 'Progressing', 10, sts)
           print(f"Starting Forwarding Process... From :{sts.get('FROM')} To: {sts.get('TO')} Totel: {sts.get('limit')} stats : {sts.get('skip')})")
           async for message in client.iter_messages(
             client,
@@ -76,8 +76,8 @@ async def pub_(bot, message):
                 if await is_cancelled(client, user, m, sts):
                    return
                 if pling %20 == 0: 
-                   await edit(m, 'Progressing', 1, sts)
-                pling += 1
+                   await edit(m, 'Progressing', 10, sts)
+                pling += 10
                 sts.add('fetched')
                 if message == "DUPLICATE":
                    sts.add('duplicate')
@@ -96,7 +96,7 @@ async def pub_(bot, message):
                         or completed <= 100): 
                       await forward(client, MSG, m, sts, protect)
                       sts.add('total_files', notcompleted)
-                      await asyncio.sleep(1)
+                      await asyncio.sleep(10)
                       MSG = []
                 else:
                    new_caption = custom_caption(message, caption)
@@ -133,7 +133,7 @@ async def copy(bot, msg, m, sts):
    except FloodWait as e:
      await edit(m, 'Progressing', e.value, sts)
      await asyncio.sleep(e.value)
-     await edit(m, 'Progressing', 1, sts)
+     await edit(m, 'Progressing', 10, sts)
      await copy(bot, msg, m, sts)
    except Exception as e:
      print(e)
@@ -149,7 +149,7 @@ async def forward(bot, msg, m, sts, protect):
    except FloodWait as e:
      await edit(m, 'Progressing', e.value, sts)
      await asyncio.sleep(e.value)
-     await edit(m, 'Progressing', 1, sts)
+     await edit(m, 'Progressing', 10, sts)
      await forward(bot, msg, m, sts, protect)
 
 PROGRESS = """

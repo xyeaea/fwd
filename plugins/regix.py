@@ -57,7 +57,7 @@ async def pub_(bot, message):
     await db.add_frwd(user)
     await send(client, user, "<b>ғᴏʀᴡᴀʀᴅɪɴɢ sᴛᴀʀᴛᴇᴅ <a href=https://t.me/dev_gagan>Dev Gagan</a></b>")
     sts.add(time=True)
-    sleep = 1 if _bot['is_bot'] else 1
+    sleep = 5 if _bot['is_bot'] else 1
     await msg_edit(m, "<code>Processing...</code>") 
     temp.IS_FRWD_CHAT.append(i.TO)
     temp.lock[user] = locked = True

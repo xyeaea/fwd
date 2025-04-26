@@ -153,8 +153,9 @@ class Database:
         filter_query = {} if all_users else {'user_id': user_id}
         await self.notify.delete_many(filter_query)
 
-    async def get_all_forwards(self):
-        return self.notify.find({})
+    async def get_all_forwards(self) -> List[Dict[str, Any]]:
+        cursor = self.notify.find({})
+        return await cursor.to_list(length=None)
 
 # Initialize Database
 db = Database(Config.DATABASE_URI, Config.DATABASE_NAME)

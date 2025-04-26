@@ -1,12 +1,14 @@
-from typing import Any, Dict, List, Optional
-from config import Config
+from typing import Any, Dict, List, Optional, Tuple
 import motor.motor_asyncio
 from pymongo import MongoClient
+from config import Config
 
 # Cek versi MongoDB
 async def mongodb_version() -> str:
     client = MongoClient(Config.DATABASE_URI)
-    return client.server_info()['version']
+    version = client.server_info().get('version', 'Unknown')
+    client.close()
+    return version
 
 class Database:
     def __init__(self, uri: str, database_name: str):
@@ -30,15 +32,15 @@ class Database:
 
     async def add_user(self, user_id: int, name: str) -> None:
         if not await self.is_user_exist(user_id):
-            user = self._new_user(user_id, name)
-            await self.users.insert_one(user)
+            await self.users.insert_one(self._new_user(user_id, name))
 
     async def is_user_exist(self, user_id: int) -> bool:
-        return await self.users.find_one({'id': user_id}) is not None
+        return await self.users.find_one({'id': user_id}, {'_id': 1}) is not None
 
-    async def total_users_bots_count(self) -> tuple[int, int]:
-        users_count = await self.users.count_documents({})
-        bots_count = await self.bot.count_documents({})
+    async def total_users_bots_count(self) -> Tuple[int, int]:
+        users_count_task = self.users.count_documents({})
+        bots_count_task = self.bot.count_documents({})
+        users_count, bots_count = await users_count_task, await bots_count_task
         return users_count, bots_count
 
     async def total_channels(self) -> int:
@@ -47,13 +49,13 @@ class Database:
     async def ban_user(self, user_id: int, reason: str = "No Reason") -> None:
         await self.users.update_one(
             {'id': user_id},
-            {'$set': {'ban_status': {'is_banned': True, 'ban_reason': reason}}}
+            {'$set': {'ban_status.is_banned': True, 'ban_status.ban_reason': reason}}
         )
 
     async def remove_ban(self, user_id: int) -> None:
         await self.users.update_one(
             {'id': user_id},
-            {'$set': {'ban_status': {'is_banned': False, 'ban_reason': ''}}}
+            {'$set': {'ban_status.is_banned': False, 'ban_status.ban_reason': ''}}
         )
 
     async def get_ban_status(self, user_id: int) -> Dict[str, Any]:
@@ -61,7 +63,7 @@ class Database:
         return user.get('ban_status', {'is_banned': False, 'ban_reason': ''}) if user else {'is_banned': False, 'ban_reason': ''}
 
     async def delete_user(self, user_id: int) -> None:
-        await self.users.delete_many({'id': user_id})
+        await self.users.delete_one({'id': user_id})
 
     async def get_all_users(self):
         return self.users.find({})
@@ -105,27 +107,32 @@ class Database:
             await self.bot.insert_one(bot_data)
 
     async def remove_bot(self, user_id: int) -> None:
-        await self.bot.delete_many({'user_id': user_id})
+        await self.bot.delete_one({'user_id': user_id})
 
     async def get_bot(self, user_id: int) -> Optional[Dict[str, Any]]:
         return await self.bot.find_one({'user_id': user_id})
 
     async def is_bot_exist(self, user_id: int) -> bool:
-        return await self.bot.find_one({'user_id': user_id}) is not None
+        return await self.bot.find_one({'user_id': user_id}, {'_id': 1}) is not None
 
     async def in_channel(self, user_id: int, chat_id: int) -> bool:
-        return await self.channels.find_one({'user_id': user_id, 'chat_id': chat_id}) is not None
+        return await self.channels.find_one({'user_id': user_id, 'chat_id': chat_id}, {'_id': 1}) is not None
 
     async def add_channel(self, user_id: int, chat_id: int, title: str, username: Optional[str]) -> bool:
         if await self.in_channel(user_id, chat_id):
             return False
-        await self.channels.insert_one({'user_id': user_id, 'chat_id': chat_id, 'title': title, 'username': username})
+        await self.channels.insert_one({
+            'user_id': user_id,
+            'chat_id': chat_id,
+            'title': title,
+            'username': username
+        })
         return True
 
     async def remove_channel(self, user_id: int, chat_id: int) -> bool:
         if not await self.in_channel(user_id, chat_id):
             return False
-        await self.channels.delete_many({'user_id': user_id, 'chat_id': chat_id})
+        await self.channels.delete_one({'user_id': user_id, 'chat_id': chat_id})
         return True
 
     async def get_channel_details(self, user_id: int, chat_id: int) -> Optional[Dict[str, Any]]:

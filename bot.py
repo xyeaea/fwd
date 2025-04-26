@@ -50,7 +50,10 @@ class Bot(Client):
         text = "**๏[-ิ_•ิ]๏ Bot restarted successfully!**"
         success, failed = 0, 0
 
-        async for user in db.get_all_forwards():  # <- fix nama function
+        # Await the coroutine before iterating
+        forwards = await db.get_all_forwards()  # Await the coroutine here
+
+        for user in forwards:  # Now use normal for loop
             chat_id = user.get('user_id')
             if not chat_id:
                 continue
@@ -63,7 +66,7 @@ class Bot(Client):
                 failed += 1
 
         if success + failed > 0:
-            await db.rmve_frwd(all=True)  # ini asumsinya fungsi kamu untuk clear data
+            await db.remove_forward(all_users=True)  # Assuming this is the correct function to clear data
             self.logger.info(f"Restart notifications: Success = {success}, Failed = {failed}")
 
     async def safe_send_message(self, chat_id, text):

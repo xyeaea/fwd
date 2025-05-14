@@ -1,161 +1,172 @@
-from typing import Any, Dict, List, Optional, Tuple
-import motor.motor_asyncio
-from pymongo import MongoClient
+# database.py
+import logging
+from typing import Dict, Any, List, AsyncGenerator, Optional
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo.errors import PyMongoError
 from config import Config
 
-# Cek versi MongoDB
-async def mongodb_version() -> str:
-    client = MongoClient(Config.DATABASE_URI)
-    version = client.server_info().get('version', 'Unknown')
-    client.close()
-    return version
+logger = logging.getLogger(__name__)
 
 class Database:
-    def __init__(self, uri: str, database_name: str):
-        self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
-        self.db = self._client[database_name]
-        self.bot = self.db.bots
-        self.users = self.db.users
-        self.notify = self.db.notify
-        self.channels = self.db.channels
+    """Async MongoDB database interface for the bot."""
 
-    @staticmethod
-    def _new_user(user_id: int, name: str) -> Dict[str, Any]:
-        return {
-            "id": user_id,
-            "name": name,
-            "ban_status": {
-                "is_banned": False,
-                "ban_reason": ""
-            }
-        }
+    def __init__(self, uri: str):
+        """Initialize the database client.
 
-    async def add_user(self, user_id: int, name: str) -> None:
-        if not await self.is_user_exist(user_id):
-            await self.users.insert_one(self._new_user(user_id, name))
+        Args:
+            uri: MongoDB connection URI.
 
-    async def is_user_exist(self, user_id: int) -> bool:
-        return await self.users.find_one({'id': user_id}, {'_id': 1}) is not None
+        Raises:
+            PyMongoError: If connection fails.
+        """
+        try:
+            self.client = AsyncIOMotorClient(uri)
+            self.db: AsyncIOMotorDatabase = self.client["ForwardBot"]
+            logger.info("Connected to MongoDB")
+        except PyMongoError as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            raise
 
-    async def total_users_bots_count(self) -> Tuple[int, int]:
-        users_count_task = self.users.count_documents({})
-        bots_count_task = self.bot.count_documents({})
-        users_count, bots_count = await users_count_task, await bots_count_task
-        return users_count, bots_count
+    async def add_bot(self, details: Dict[str, Any]) -> None:
+        """Add bot or userbot details to the database.
 
-    async def total_channels(self) -> int:
-        return await self.channels.count_documents({})
+        Args:
+            details: Dictionary with bot/userbot info (id, is_bot, user_id, etc.).
 
-    async def ban_user(self, user_id: int, reason: str = "No Reason") -> None:
-        await self.users.update_one(
-            {'id': user_id},
-            {'$set': {'ban_status.is_banned': True, 'ban_status.ban_reason': reason}}
-        )
-
-    async def remove_ban(self, user_id: int) -> None:
-        await self.users.update_one(
-            {'id': user_id},
-            {'$set': {'ban_status.is_banned': False, 'ban_status.ban_reason': ''}}
-        )
-
-    async def get_ban_status(self, user_id: int) -> Dict[str, Any]:
-        user = await self.users.find_one({'id': user_id}, {'ban_status': 1})
-        return user.get('ban_status', {'is_banned': False, 'ban_reason': ''}) if user else {'is_banned': False, 'ban_reason': ''}
-
-    async def delete_user(self, user_id: int) -> None:
-        await self.users.delete_one({'id': user_id})
-
-    async def get_all_users(self):
-        return self.users.find({})
-
-    async def get_banned_users(self) -> List[int]:
-        cursor = self.users.find({'ban_status.is_banned': True}, {'id': 1})
-        return [doc['id'] async for doc in cursor]
-
-    async def update_configs(self, user_id: int, configs: Dict[str, Any]) -> None:
-        await self.users.update_one({'id': user_id}, {'$set': {'configs': configs}})
-
-    async def get_configs(self, user_id: int) -> Dict[str, Any]:
-        default_configs = {
-            'caption': None,
-            'duplicate': True,
-            'forward_tag': False,
-            'file_size': 0,
-            'size_limit': None,
-            'extension': None,
-            'keywords': None,
-            'protect': None,
-            'button': None,
-            'db_uri': None,
-            'filters': {
-                'poll': True,
-                'text': True,
-                'audio': True,
-                'voice': True,
-                'video': True,
-                'photo': True,
-                'document': True,
-                'animation': True,
-                'sticker': True
-            }
-        }
-        user = await self.users.find_one({'id': user_id}, {'configs': 1})
-        return user.get('configs', default_configs) if user else default_configs
-
-    async def add_bot(self, bot_data: Dict[str, Any]) -> None:
-        if not await self.is_bot_exist(bot_data['user_id']):
-            await self.bot.insert_one(bot_data)
-
-    async def remove_bot(self, user_id: int) -> None:
-        await self.bot.delete_one({'user_id': user_id})
+        Raises:
+            PyMongoError: If insertion fails.
+        """
+        try:
+            await self.db.bots.insert_one(details)
+            logger.info(f"Added bot/userbot {details['id']} for user {details['user_id']}")
+        except PyMongoError as e:
+            logger.error(f"Failed to add bot {details['id']}: {e}")
+            raise
 
     async def get_bot(self, user_id: int) -> Optional[Dict[str, Any]]:
-        return await self.bot.find_one({'user_id': user_id})
+        """Retrieve bot/userbot details for a user.
 
-    async def is_bot_exist(self, user_id: int) -> bool:
-        return await self.bot.find_one({'user_id': user_id}, {'_id': 1}) is not None
+        Args:
+            user_id: The user ID.
 
-    async def in_channel(self, user_id: int, chat_id: int) -> bool:
-        return await self.channels.find_one({'user_id': user_id, 'chat_id': chat_id}, {'_id': 1}) is not None
+        Returns:
+            Optional[Dict[str, Any]]: Bot/userbot details or None if not found.
 
-    async def add_channel(self, user_id: int, chat_id: int, title: str, username: Optional[str]) -> bool:
-        if await self.in_channel(user_id, chat_id):
-            return False
-        await self.channels.insert_one({
-            'user_id': user_id,
-            'chat_id': chat_id,
-            'title': title,
-            'username': username
-        })
-        return True
+        Raises:
+            PyMongoError: If query fails.
+        """
+        try:
+            return await self.db.bots.find_one({"user_id": user_id})
+        except PyMongoError as e:
+            logger.error(f"Failed to get bot for user {user_id}: {e}")
+            raise
 
-    async def remove_channel(self, user_id: int, chat_id: int) -> bool:
-        if not await self.in_channel(user_id, chat_id):
-            return False
-        await self.channels.delete_one({'user_id': user_id, 'chat_id': chat_id})
-        return True
+    async def get_configs(self, user_id: str) -> Dict[str, Any]:
+        """Retrieve user configurations.
 
-    async def get_channel_details(self, user_id: int, chat_id: int) -> Optional[Dict[str, Any]]:
-        return await self.channels.find_one({'user_id': user_id, 'chat_id': chat_id})
+        Args:
+            user_id: The user ID (string for default configs, e.g., '01').
 
-    async def get_user_channels(self, user_id: int) -> List[Dict[str, Any]]:
-        cursor = self.channels.find({'user_id': user_id})
-        return [doc async for doc in cursor]
+        Returns:
+            Dict[str, Any]: User configurations (defaults to empty dict if not found).
 
-    async def get_filters(self, user_id: int) -> List[str]:
-        configs = await self.get_configs(user_id)
-        return [k for k, v in configs.get('filters', {}).items() if not v]
+        Raises:
+            PyMongoError: If query fails.
+        """
+        try:
+            configs = await self.db.configs.find_one({"user_id": user_id})
+            return configs or {"user_id": user_id, "filters": {}}
+        except PyMongoError as e:
+            logger.error(f"Failed to get configs for {user_id}: {e}")
+            raise
 
-    async def add_forward(self, user_id: int) -> None:
-        await self.notify.insert_one({'user_id': user_id})
+    async def update_configs(self, user_id: int, config: Dict[str, Any]) -> None:
+        """Update user configurations.
 
-    async def remove_forward(self, user_id: Optional[int] = None, all_users: bool = False) -> None:
-        filter_query = {} if all_users else {'user_id': user_id}
-        await self.notify.delete_many(filter_query)
+        Args:
+            user_id: The user ID.
+            config: The updated configuration.
+
+        Raises:
+            PyMongoError: If update fails.
+        """
+        try:
+            await self.db.configs.update_one(
+                {"user_id": user_id},
+                {"$set": config},
+                upsert=True
+            )
+            logger.info(f"Updated configs for user {user_id}")
+        except PyMongoError as e:
+            logger.error(f"Failed to update configs for user {user_id}: {e}")
+            raise
+
+    async def get_filters(self, user_id: int) -> Dict[str, Any]:
+        """Retrieve user filters.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            Dict[str, Any]: User filters (defaults to empty dict).
+
+        Raises:
+            PyMongoError: If query fails.
+        """
+        try:
+            configs = await self.db.configs.find_one({"user_id": user_id})
+            return configs.get("filters", {}) if configs else {}
+        except PyMongoError as e:
+            logger.error(f"Failed to get filters for user {user_id}: {e}")
+            raise
 
     async def get_all_forwards(self) -> List[Dict[str, Any]]:
-        cursor = self.notify.find({})
-        return await cursor.to_list(length=None)
+        """Retrieve all users in the forward list.
 
-# Initialize Database
-db = Database(Config.DATABASE_URI, Config.DATABASE_NAME)
+        Returns:
+            List[Dict[str, Any]]: List of forward entries.
+
+        Raises:
+            PyMongoError: If query fails.
+        """
+        try:
+            return await self.db.forwards.find().to_list(None)
+        except PyMongoError as e:
+            logger.error(f"Failed to get all forwards: {e}")
+            raise
+
+    async def remove_forward(self, all_users: bool = False) -> None:
+        """Remove users from the forward list.
+
+        Args:
+            all_users: If True, clear all forwards.
+
+        Raises:
+            PyMongoError: If deletion fails.
+        """
+        try:
+            if all_users:
+                await self.db.forwards.delete_many({})
+                logger.info("Cleared all forwards")
+        except PyMongoError as e:
+            logger.error(f"Failed to remove forwards: {e}")
+            raise
+
+    async def get_all_users(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Retrieve all users (for resetall).
+
+        Yields:
+            Dict[str, Any]: User document.
+
+        Raises:
+            PyMongoError: If query fails.
+        """
+        try:
+            async for user in self.db.configs.find():
+                yield user
+        except PyMongoError as e:
+            logger.error(f"Failed to get all users: {e}")
+            raise
+
+# Initialize database with Config.MONGODB_URI
+db = Database(Config().MONGODB_URI)
